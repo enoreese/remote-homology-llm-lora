@@ -1,0 +1,81 @@
+base_model: mistralai/Mistral-7B-v0.1
+model_type: MistralForCausalLM
+tokenizer_type: LlamaTokenizer
+is_mistral_derived_model: true
+dataset_url: https://storage.googleapis.com/projects-bkt/llm-bkt/dna_files/dataset_alpaca.jsonl
+
+load_in_8bit: false
+strict: false
+
+datasets:
+  - path: dataset_alpaca.jsonl
+    ds_type: json
+    type:
+      # JSONL file contains question, context, answer fields per line.
+      # This gets mapped to instruction, input, output axolotl tags.
+      field_instruction: question
+      field_input: context
+      field_output: answer
+      # Format is used by axolotl to generate the prompt.
+      format: |-
+        [INST]
+        {instruction}
+        [/INST]
+        [DNA SEQUENCE]
+        {input}
+        [/DNA SEQUENCE]
+        [SUMMARY]
+
+dataset_prepared_path:
+val_set_size: 0
+output_dir: ./lora-out
+
+sequence_len: 4096
+sample_packing: true
+eval_sample_packing: false
+pad_to_sequence_len: true
+
+adapter: lora
+lora_model_dir:
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_linear: true
+lora_fan_in_fan_out:
+
+wandb_project: dna-llm
+wandb_watch: gradients
+wandb_run_id: Mistral-7B-v0.1-A100-1
+
+gradient_accumulation_steps: 1
+micro_batch_size: 1
+num_epochs: 1
+optimizer: adamw_bnb_8bit
+lr_scheduler: cosine
+learning_rate: 0.0002
+
+bf16: true
+fp16: false
+tf32: false
+train_on_inputs: false
+group_by_length: false
+
+gradient_checkpointing: true
+early_stopping_patience:
+resume_from_checkpoint:
+local_rank:
+logging_steps: 1
+xformers_attention:
+flash_attention: true
+
+warmup_steps: 10
+save_steps:
+debug: True
+deepspeed: /root/axolotl/deepspeed/zero3.json
+weight_decay: 0.0
+fsdp:
+fsdp_config:
+special_tokens:
+  bos_token: "<s>"
+  eos_token: "</s>"
+  unk_token: "<unk>"

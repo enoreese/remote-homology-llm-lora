@@ -1,4 +1,2 @@
-/llm-finetuning/datasets/
-/llm-finetuning/deprecated/
-/llm-finetuning/raw_data/
-/llm-finetuning/src/dataset_json.json
+/datasets/
+/raw_data/
