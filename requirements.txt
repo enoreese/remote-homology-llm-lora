@@ -1,5 +1,5 @@
 requests~=2.31.0
-modal~=0.56.4881
+modal~=0.61.45
 python-dotenv~=1.0.0
 tqdm~=4.66.1
 google-cloud-storage
@@ -8,3 +8,5 @@ fastapi~=0.108.0
 jsonlines~=4.0.0
 datasets~=2.16.1
 yaml
+numpy~=1.26.3
+pandas~=2.1.4

@@ -1,11 +1,12 @@
-from datetime import datetime
-import secrets
-import modal
 import os
+from tqdm import tqdm
+import modal
+import secrets
 import requests
-from .kmer import kmer_featurization
+import pandas as pd
+from datetime import datetime
 
-from .common import (
+from common import (
     stub,
     axolotl_image,
     VOLUME_CONFIG,
@@ -14,6 +15,27 @@ from .common import (
 N_GPUS = int(os.environ.get("N_GPUS", 2))
 GPU_MEM = int(os.environ.get("GPU_MEM", 80))
 GPU_CONFIG = modal.gpu.A100(count=N_GPUS, memory=GPU_MEM)
+
+QUESTION = """
+Generate the pairwise structural alignment using the provided protein sequences.
+Possible Values:
+- "1"
+- "2"
+- ":" denotes residue pairs of d < 5.0 Angstrom
+- "." denotes other aligned residues
+"""
+
+
+def tmsalign_parser(z):
+    """ Parsing TM-specific state string. """
+    if z == '1':
+        return '0'
+    elif z == '2':
+        return '1'
+    elif z == ':':
+        return '2'
+    else:
+        return '3'
 
 
 def print_common_training_issues(config):
@@ -96,13 +118,21 @@ def merge(run_folder: str):
     VOLUME_CONFIG["/runs"].commit()
 
 
+def alignment_parse(chain1, chain2, alignment):
+    line = {
+        'question': QUESTION,
+        'context': f"SEQ 1: {chain1}\nSEQ 2: {chain2}",
+        'answer': alignment
+    }
+    return line
+
+
 @stub.function(
     image=axolotl_image,
-    timeout=60 * 30,
+    timeout=60 * 60 * 6,
     volumes=VOLUME_CONFIG,
-    # mounts=modal.Mount.from_local_python_packages("kmer")
 )
-def launch(config_raw: str, use_kmer: bool = True):
+def launch(config_raw: str, download_data: bool = False, sample_size=10000):
     from huggingface_hub import snapshot_download
     import yaml
     import json, jsonlines
@@ -112,6 +142,8 @@ def launch(config_raw: str, use_kmer: bool = True):
     config = yaml.safe_load(config_raw)
     model_name = config["base_model"]
     dataset_url = config['dataset_url']
+
+    VOLUME_CONFIG["/pretrained"].reload()
 
     try:
         snapshot_download(model_name, local_files_only=True)
@@ -126,38 +158,41 @@ def launch(config_raw: str, use_kmer: bool = True):
     # Write config and data into a training subfolder.
     time_string = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     run_folder = f"/runs/axo-{time_string}-{secrets.token_hex(2)}"
+    data_folder = f"/runs/data"
     os.makedirs(run_folder)
+    os.makedirs(data_folder, exist_ok=True)
 
     print(f"Preparing training run in {run_folder}.")
-    temp_file_name = "my_data.jsonl"
+    temp_file_name = "temp_data.txt"
     data_file_name = config['datasets'][0]['path']
-    print("Downloading data...")
 
-    r = requests.get(dataset_url)
-    data_raw = r.text
-    print(data_raw[:20])
+    print("Checking data...")
+    data_fname = f"{run_folder}/{data_file_name}"
+    if not os.path.isfile(data_fname) or download_data:
+        if not os.path.isfile(f"{data_folder}/{temp_file_name}"):
+            print("Downloading data...")
+            r = requests.get(dataset_url)
+            data_raw = r.text
 
-    if not use_kmer:
-        temp_file_name = data_file_name
+            with open(f"{data_folder}/{temp_file_name}", "w") as temp_data_file:
+                print("Writing raw data...")
+                temp_data_file.write(data_raw)
 
-    with open(f"{run_folder}/{temp_file_name}", "w") as data_file:
-        print("Writing data...")
-        data_file.write(data_raw)
+        print("Parsing alignment...")
+        table = pd.read_table(f"{data_folder}/{temp_file_name}")
+        if sample_size:
+            table = table.sample(sample_size)
+        print("Shape: ", table.shape)
+        table['parsed_alignment'] = table['alignment'].apply(lambda z: "".join(list(map(tmsalign_parser, str(z)))))
 
-    if use_kmer:
-        print("Using kmer...")
-        featurizer = kmer_featurization(5)
-        with open(f"{run_folder}/{temp_file_name}", 'r') as r, jsonlines.open(f"{run_folder}/{data_file_name}", 'w') as w:
-            for line in r:
-                record = json.loads(line)
-                seq = record['context'].split(" ")
-                kmer_feature = featurizer.obtain_kmer_feature_for_a_list_of_sequences(seq)
+        tups = list(table[['chain1', 'chain2', 'parsed_alignment']].itertuples(index=False, name=None))
+        data = [alignment_parse(*tup) for tup in tups]
+        print(data[:2])
 
-                record['question'] = record['question'].strip()
-                record['context'] = kmer_feature
-                record['answer'] = record['answer'].strip()
-
-                w.write(record)
+        with jsonlines.open(f"{run_folder}/{data_file_name}", "w") as data_file:
+            print("Writing data...")
+            for dic in tqdm(data):
+                data_file.write(dic)
 
     print("Writing config...")
     with open(f"{run_folder}/config.yml", "w") as config_file:
@@ -175,19 +210,18 @@ def launch(config_raw: str, use_kmer: bool = True):
 
 
 @stub.local_entrypoint()
-def main(config: str = "config.yml", use_kmer: bool = True):
+def main(config: str = "config.yml", download_data: bool = False):
     # Read config.yml and my_data.jsonl and pass them to the new function.
     print("Reading config...")
     dir = os.path.dirname(__file__)
     with open(f"{dir}/{config}", "r") as cfg:
         config_content = cfg.read()
 
-    _, train_handle = launch.remote(config_content, use_kmer)
+    _, train_handle = launch.remote(config_content, download_data)
 
     # Wait for the training run to finish.
     merge_handle = train_handle.get()
     merge_handle.get()
-
 
 # @stub.local_entrypoint()
 # def main_merge(run_folder: str):
