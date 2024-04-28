@@ -1,2 +1,9 @@
 /datasets/
 /raw_data/
+/notebooks/scop/
+/notebooks/.ipynb_checkpoints/
+/src/
+/TMalign-master/
+/configs/
+/google-cloud-cli-472.0.0-darwin-x86_64.tar.gz
+/.ipynb_checkpoints/

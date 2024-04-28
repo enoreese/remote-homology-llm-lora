@@ -1,11 +1,8 @@
 base_model: mistralai/Mistral-7B-v0.1
 model_type: MistralForCausalLM
 tokenizer_type: LlamaTokenizer
-is_mistral_derived_model: true
-dataset_url: https://storage.googleapis.com/projects-bkt/llm-bkt/dna_files/dataset_alpaca.jsonl
 
-load_in_8bit: false
-strict: false
+dataset_url: https://storage.googleapis.com/projects-bkt/research-bkt/deepblast/train_matched.txt
 
 datasets:
   - path: dataset_alpaca.jsonl
@@ -18,47 +15,55 @@ datasets:
       field_output: answer
       # Format is used by axolotl to generate the prompt.
       format: |-
-        [INST]
         {instruction}
-        [/INST]
-        [DNA SEQUENCE]
+        
         {input}
-        [/DNA SEQUENCE]
-        [SUMMARY]
 
-dataset_prepared_path:
-val_set_size: 0
+wandb_project: protein-psa-finetune
+wandb_watch: gradients
+wandb_run_id: Mistral-7B-v0.1-2A100-no-parse
+
+load_in_8bit: true
+load_in_4bit: false
+strict: false
+
+dataset_prepared_path: last_run_prepared
+val_set_size: 0.1
 output_dir: ./lora-out
-
-sequence_len: 4096
-sample_packing: true
-eval_sample_packing: false
-pad_to_sequence_len: true
 
 adapter: lora
 lora_model_dir:
+
+sequence_len: 8192
+sample_packing: true
+pad_to_sequence_len: true
+
 lora_r: 16
 lora_alpha: 32
 lora_dropout: 0.05
 lora_target_linear: true
 lora_fan_in_fan_out:
-
-wandb_project: dna-llm
-wandb_watch: gradients
-wandb_run_id: Mistral-7B-v0.1-A100-1
+lora_target_modules:
+  - gate_proj
+  - down_proj
+  - up_proj
+  - q_proj
+  - v_proj
+  - k_proj
+  - o_proj
 
 gradient_accumulation_steps: 1
-micro_batch_size: 1
+micro_batch_size: 2
 num_epochs: 1
-optimizer: adamw_bnb_8bit
+optimizer: paged_adamw_8bit
 lr_scheduler: cosine
-learning_rate: 0.0002
+learning_rate: 0.000002
 
-bf16: true
-fp16: false
-tf32: false
 train_on_inputs: false
 group_by_length: false
+bf16: auto
+fp16:
+tf32: false
 
 gradient_checkpointing: true
 early_stopping_patience:
@@ -68,14 +73,17 @@ logging_steps: 1
 xformers_attention:
 flash_attention: true
 
+loss_watchdog_threshold: 5.0
+loss_watchdog_patience: 3
+
 warmup_steps: 10
+eval_steps: 100
+eval_table_size:
+eval_max_new_tokens: 128
 save_steps:
-debug: True
-deepspeed: /root/axolotl/deepspeed/zero3.json
+debug:
+deepspeed:
 weight_decay: 0.0
 fsdp:
 fsdp_config:
 special_tokens:
-  bos_token: "<s>"
-  eos_token: "</s>"
-  unk_token: "<unk>"
