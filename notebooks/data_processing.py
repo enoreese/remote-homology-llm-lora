@@ -5,7 +5,7 @@ chunksize = 1000000
 
 if __name__ == '__main__':
     data = []
-    for chunk in tqdm(pd.read_csv('scop/scop_pairs.csv', index_col=0, chunksize=chunksize)):
+    for chunk in tqdm(pd.read_csv('../datasets/scop/scop_pairs.csv', index_col=0, chunksize=chunksize)):
         homologs = chunk[chunk.remote_homologs == True]
         non_homologs = chunk[chunk.remote_homologs == False].sample(homologs.shape[0])
 
@@ -18,8 +18,8 @@ if __name__ == '__main__':
         data.append(data_)
 
     data = pd.concat(data, axis=0)
-    fa_seq = pd.read_csv('scop/scop_fa_represeq_lib_latest.csv')
-    sf_seq = pd.read_csv('scop/scop_sf_represeq_lib_latest.csv')
+    fa_seq = pd.read_csv('../datasets/scop/scop_fa_represeq_lib_latest.csv')
+    sf_seq = pd.read_csv('../datasets/scop/scop_sf_represeq_lib_latest.csv')
 
 
     def merge_fn(row, seq=fa_seq, col='FA'):
