@@ -1,209 +1,125 @@
-# Fine-tune any LLM in minutes (ft. LLaMA, CodeLlama, Mistral)
+# Protein Remote Homology Detection Using Large Language Models and LoRA
 
-### Tired of prompt engineering? You've come to the right place.
+## Introduction
 
-This no-frills guide will take you from a dataset to using a fine-tuned LLM for inference in the matter of minutes. The heavy lifting is done by the [`axolotl` framework](https://github.com/OpenAccess-AI-Collective/axolotl).
+This repository contains research code and Jupyter notebooks for detecting remote homology in protein sequences using Protein Language Models (PLMs) such as:
+- [ProGen 2](https://arxiv.org/pdf/2206.13517)
+- [ProLLaMa](https://arxiv.org/pdf/2402.16445)
+- [ESM](https://www.biorxiv.org/content/10.1101/2022.07.20.500902v2)
 
-<details>
-  <summary>We use all the recommended, state-of-the-art optimizations for fast results.</summary>
-  
-<br>
-  
-- *Deepspeed ZeRO-3* to efficiently shard the base model and training state across multiple GPUs ([more info](https://www.deepspeed.ai/2021/03/07/zero3-offload.html))
-- *Parameter-efficient fine-tuning* via LoRA adapters for faster convergence
-- *Flash attention* for fast and memory-efficient attention during training (note: only works with certain hardware, like A100s)
-- *Gradient checkpointing* to reduce VRAM footprint, fit larger batches and get higher training throughput
-</details>
+Remote homology detection is a challenging task that involves identifying pairs of proteins with similar structures but low sequence similarity. Specifically, remote homology at the superfamily level involves proteins in the same superfamily but different families. Superfamily membership indicates similar structural characteristics, while family membership indicates high sequence similarity.
 
+## Project Structure
 
-Using Modal for fine-tuning means you never have to worry about infrastructure headaches like building images and provisioning GPUs. If a training script runs on Modal, it's reproducible and scalable enough to ship to production right away.
+The repository is organized as follows:
 
-## Quickstart
+- **`notebooks/`**: Contains Jupyter notebooks used for data exploration, model training, and evaluation.
+- **`scripts/`**: Contains Python scripts for preprocessing data, training models, and running experiments.
+- **`README.md`**: Project overview and instructions.
 
-Follow the steps to quickly train and test your fine-tuned model:
-1. Create a Modal account and create a Modal token and HuggingFace secret for your workspace, if not already set up.
-    <details> 
-    <summary>Setting up Modal</summary>
+## Requirements
 
-    1. Create a [Modal](https://modal.com/) account.
-    2. Install `modal` in your current Python virtual environment (`pip install modal`)
-    3. Set up a Modal token in your environment (`python3 -m modal setup`)
-    4. You need to have a [secret](https://modal.com/docs/guide/secrets#secrets) named `huggingface` in your workspace. You can [create a new secret](https://modal.com/secrets) with the HuggingFace template in your Modal dashboard, using the same key from HuggingFace (in settings under API tokens) to populate both `HUGGING_FACE_HUB_TOKEN` and `HUGGINGFACE_TOKEN`.
-    5. For some LLaMA models, you need to go to the [Hugging Face page](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf) and agree to their Terms and Conditions for access (granted instantly).
-    </details>
+To run the code in this repository, you need the following dependencies:
 
-2. Clone this repository and navigate to the finetuning directory:
-```bash
-git clone https://github.com/modal-labs/llm-finetuning.git
-cd llm-finetuning
-```
-3. Launch a training job:
-```bash
-modal run --detach src.train
-```
+- Python 3.8+
+- PyTorch 1.8+
+- Transformers 4.5+
+- NumPy
+- Pandas
+- Scikit-learn
+- HuggingFace Datasets
+- Jupyter Notebook
+- WandB (optional for experiment tracking)
 
-4. Try the model from a completed training run. You can select a folder via `modal volume ls example-runs-vol`, and then specify the training folder with the `--run-folder` flag (something like `/runs/axo-2023-11-24-17-26-66e8`) for inference:
+You can install the required packages using the following command:
 
 ```bash
-modal run -q src.inference --run-folder /runs/<run_tag>
+pip install -r requirements.txt
 ```
 
-The default configuration fine-tunes CodeLlama Instruct 7B on a text-to-SQL dataset for five epochs (takes a few minutes) as a proof of concept. It uses DeepSpeed ZeRO-3 to shard the model state across 2 A100s. Inference on the fine-tuned model displays conformity to the output structure (`[SQL] ... [/SQL]`). To achieve better results, you would need to use more data! Refer to the full development section below.
+## Quick Start
 
-5. (Optional) Launch the GUI for easy observability of training status.
+### 1. Clone the Repository
 
 ```bash
-modal deploy src
-modal run src.gui
+git clone https://github.com/enoreese/remote-homology-llm-lora.git
+cd remote-homology-llm-lora
 ```
 
-The `*.modal.host` link from the latter will take you to the Gradio GUI. There will be two tabs: (1) launch new training runs, (2) test out trained models.
+### 2. Prepare the Data
 
-## Development
+Download and preprocess the dataset using the provided scripts. Ensure that the data is placed in the `data/` directory.
 
-### Code overview
-
-All the logic lies in `train.py`. Three business Modal functions run in the cloud:
-
-* `launch` prepares a new folder in the `/runs` volume with the training config and data for a new training job. It also ensures the base model is downloaded from HuggingFace.
-* `train` takes a prepared folder and performs the training job using the config and data.
-* `Inference.completion` can spawn a [vLLM](https://modal.com/docs/examples/vllm_inference#fast-inference-with-vllm-mistral-7b) inference container for any pre-trained or fine-tuned model from a previous training job.
-
-The rest of the code are helpers for _calling_ these three functions. There are two main ways to train:
-
-* [Use the GUI](#using-the-gui) to familiarize with the system (recommended for new fine-tuners!)
-* [Use CLI commands](#using-the-cli) (recommended for power users)
-
-### Config
-
-You can `example_configs` for quick start with different models. We recommend duplicating one to `src/config.yml` and modifying as you need. See an overview of Axolotl's config options [here](https://github.com/OpenAccess-AI-Collective/axolotl#config). The most important options to consider are:
-
-**Model**
-```yaml
-base_model: codellama/CodeLlama-7b-Instruct-hf
+```bash
+python scripts/SCOP_processing.py
 ```
 
-**Dataset** (by default we upload a local .jsonl file from the `src` folder, but you can see all dataset options [here](https://github.com/OpenAccess-AI-Collective/axolotl#dataset))
-```yaml
-datasets:
-  - path: my_data.jsonl
-    ds_type: json
-    type:
-      # JSONL file contains question, context, answer fields per line.
-      # This gets mapped to instruction, input, output axolotl tags.
-      field_instruction: question
-      field_input: context
-      field_output: answer
-      # Format is used by axolotl to generate the prompt.
-      format: |-
-        [INST] Using the schema context below, generate a SQL query that answers the question.
-        {input}
-        {instruction} [/INST] 
+### 3. Fine-tune the Model
+
+Train the model using the provided training script. You can customize the training parameters in the configuration file located in the `config/` directory.
+
+```bash
+modal scripts/finetune.py::finetune
 ```
 
-**LoRA**
-```yaml
-adapter: lora # for qlora, or leave blank for full finetune
-lora_r: 16
-lora_alpha: 32 # alpha = 2 x rank is a good starting point.
-lora_dropout: 0.05
-lora_target_linear: true # target all linear layers
+### 4. Evaluate the Model
+
+Evaluate the fine-tuned model on the validation dataset.
+
+```bash
+modal scripts/evaluate.py::evaluate
 ```
 
-### Custom Dataset
+## Usage
 
-Axolotl supports many dataset formats ([see more](https://github.com/OpenAccess-AI-Collective/axolotl#dataset)). We recommend adding your custom dataset as a .jsonl file in the `src` folder and making the appropriate modifications to your config.
+### Fine-tuned Models
 
-**Multi-GPU training**
+We provide fine-tuned models for remote homology detection. You can download and use these models for your research:
 
-We recommend [DeepSpeed](https://github.com/microsoft/DeepSpeed) for multi-GPU training, which is easy to set up. Axolotl provides several default deepspeed JSON [configurations](https://github.com/OpenAccess-AI-Collective/axolotl/tree/main/deepspeed) and Modal makes it easy to [attach multiple GPUs](https://modal.com/docs/guide/gpu#gpu-acceleration) of any type in code, so all you need to do is specify which of these configs you'd like to use.
+- [ESM-8M](https://huggingface.co/sasuface/esm2-t6-8M-lora-256-remote-homology-filtered)
+- [ESM-35M](https://huggingface.co/sasuface/esm2-t12-35M-lora-64-remote-homology-filtered)
+- [ESM-3B](https://huggingface.co/sasuface/esm2-t36-3B-lora-16-remote-homology-filtered)
+- [ProGen 2](https://huggingface.co/sasuface/progen2-small-lora-64-remote-homology-filtered)
+- [ProLLaMa](https://huggingface.co/sasuface/prollama-7b-lora-8-remote-homology-filtered)
 
-In your `config.yml`:
-```yaml
-deepspeed: /root/axolotl/deepspeed/zero3.json
-```
+You can load these models using the following code:
 
-In `train.py`:
 ```python
-N_GPUS = 2
-GPU_MEM = 80
-GPU_CONFIG = modal.gpu.A100(count=N_GPUS, memory=GPU_MEM) # you can also change this to use A10Gs or T4s
+from transformers import TextClassificationPipeline, AutoTokenizer, AutoModelForSequenceClassification
+
+prompt = """
+[Determine Homology]
+SeqPiFamily=KADPCLTFNPDKCQLSFQPDGNRCAVLIKCGWECQSVAIQYKNKTRNNTLASTWQPGDPEWYTVSVPGADGFLRTVNNTFIFEHMCNTAMFMSRQYHMWPPRK
+SeqPjFamily=QKLNLMQQTMSFLTHDLTQMMPRPVRGDQGQREPALLAGAGVLASESEGMRFVRGGVVNPLMRLPRSNLLTVGYRIHDGYLERLAWPLTDAAGSVKPTMQKLIPADSLRLQFYDGTRWQESWSSVQAIPVAVRMTLHSPQWGEIERIWLLRGPQ
+"""
+
+tokenizer = AutoTokenizer.from_pretrained('path/to/pretrained/model')
+model = AutoModelForSequenceClassification.from_pretrained('path/to/pretrained/model')
+
+pipe = TextClassificationPipeline(model=model, tokenizer=tokenizer)
+prediction = pipe(prompt, return_all_scores=True)
 ```
 
-**Logging with Weights and Biases**
+## Contributing
 
-To track your training runs with Weights and Biases:
-1. [Create](https://modal.com/secrets/create) a Weights and Biases secret in your Modal dashboard, if not set up already (only the `WANDB_API_KEY` is needed, which you can get if you log into your Weights and Biases account and go to the [Authorize page](https://wandb.ai/authorize))
-2. Add the Weights and Biases secret to your app, so initializing your stub in `common.py` should look like: 
-```python
-stub = Stub(APP_NAME, secrets=[Secret.from_name("huggingface"), Secret.from_name("my-wandb-secret")])
-```
-3. Add your wandb config to your `config.yml`:
-```yaml
-wandb_project: code-7b-sql-output
-wandb_watch: gradients
-```
+We welcome contributions from the community. If you have suggestions or improvements, please open an issue or submit a pull request.
 
-## Using the CLI
+### Steps to Contribute
 
-**Training**
+1. Fork the repository.
+2. Create a new branch: `git checkout -b feature/your-feature-name`.
+3. Make your changes and commit them: `git commit -m 'Add some feature'`.
+4. Push to the branch: `git push origin feature/your-feature-name`.
+5. Open a pull request.
 
-A simple training job can be started with
+## License
 
-```bash
-modal run --detach src.train
-```
+This project is licensed under the MIT License. See the `LICENSE` file for more details.
 
-_`--detach` lets the app continue running even if your client disconnects_.
+## Acknowledgements
 
-The script reads two local files: `config.yml` and `my_data.jsonl`. The contents passed as arguments to the remote `launch` function, which will write them to the `/runs` volume. Next, `train` will read the config and data from the new folder for reproducible training runs.
+We would like to thank the authors of PLMs and the HuggingFace Transformers library for their contributions to the open-source community. This research is built upon their work.
 
-When you make local changes to either `config.yml` or `my_data.jsonl`, they will be used for your next training run.
+---
 
-The default configuration fine-tunes CodeLlama Instruct 7B to understand Modal documentation for five epochs as a proof of concept. It uses DeepSpeed ZeRO-3 to shard the model state across 2 A100s. To achieve better results, you would need to use more data and train for more epochs.
-
-**Inference**
-
-To try a model from a completed run, you can select a folder via `modal volume ls examples-runs-vol`, and then specify the training folder for inference:
-
-```bash
-modal run -q src.inference::inference_main --run-folder /runs/axo-2023-11-24-17-26-66e8
-```
-
-
-## Using the GUI
-
-Deploy the training backend with three business functions (`launch`, `train`, `completion` in `__init__.py`). Then run the Gradio GUI.
-
-```bash
-modal deploy src
-modal run src.gui
-```
-
-The `*.modal.host` link from the latter will take you to the Gradio GUI. There will be three tabs: launch training runs, test out trained models and explore the files on the volume.
-
-
-**What is the difference between `deploy` and `run`?**
-
-- `modal deploy`: a deployed app remains ready on the cloud for invocations anywhere, anytime. This means your training jobs continue without your laptop being connected.
-- `modal run`: am ephemeral app shuts down once your local command exits. Your GUI (ephemeral app) does not waste resources when your terminal disconnects.
-
-
-## Common Errors
-
-> CUDA Out of Memory (OOM)
-
-This means your GPU(s) ran out of memory during training. To resolve, either increase your GPU count/memory capacity with multi-GPU training, or try reducing any of the following in your `config.yml`: micro_batch_size, eval_batch_size, gradient_accumulation_steps, sequence_len
-
-> self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
-> ZeroDivisionError: division by zero
-
-This means your training dataset might be too small.
-
-> Missing config option when using `modal run` in the CLI
-
-Make sure your `modal` client >= 0.55.4164 (upgrade to the latest version using `pip install --upgrade modal`)
-
-> AttributeError: 'Accelerator' object has no attribute 'deepspeed_config'
-
-Try removing the `wandb_log_model` option from your config. See [#4143](https://github.com/microsoft/DeepSpeed/issues/4143).
+For any questions or issues, please contact [osas.usen@gmail.com].
